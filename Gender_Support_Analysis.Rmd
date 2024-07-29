@@ -1,0 +1,808 @@
+---
+title: 'Appendix: Gender_Support_Analysis'
+author: "Karen Colbert"
+date: "2024-07-27"
+output:
+  html_document: default
+  pdf_document: default
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+The Structure of this document is a follows:<br> 1.) Setup Selection:
+Load libraries and define functions <br> 2.) Introduction: Briefly
+introduce the Theme analyzed<br> 3.) Data Preparation: Load and prepare
+the data<br> 4.) Data Visualization: Create and display dot plot and
+violin plot<br> 5.) Statistical Analysis: Perform and display the
+results of the Linear Mixed Model Analysis<br> 6.) Discussion: Interpret
+the results<br> 7.) Conclusion: Summarize the findings<br> 8.) Session
+Information: Ensures reproducibility<br> <br> <br> The structure of the
+Main_data_AA_All.csv file is:<br> Value: This represents the participant
+mean score <br> Test: Either PRE or POST<br> Year:
+2019,2021,2022,2023<br> Type: Climate<br> Semester: Fall, Spring<br>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#library(dplyr)
+#library(ggplot2)
+#####################################
+# Load Packages and Libraries
+#####################################
+install.packages("tidyverse")
+install.packages("patchwork")
+#install.packages("grid")
+installed.packages("dplyr")
+library(ggplot2)
+library(tidyverse)
+library(patchwork)
+library(dplyr)
+library(tidyr)
+library(reshape2)
+library(magrittr)
+#####################################################
+#
+# DOWNLOAD CUSTOM GITHUB for Split Violin Plot
+#
+#####################################################
+devtools::install_github("psyteachr/introdataviz")
+
+```
+
+```{r Split Violin Code}
+# Start Split Violin Code
+GeomSplitViolin <- ggproto(
+  "GeomSplitViolin", 
+  GeomViolin, 
+  draw_group = function(self, data, ..., draw_quantiles = NULL) {
+    data <- transform(data, 
+                      xminv = x - violinwidth * (x - xmin), 
+                      xmaxv = x + violinwidth * (xmax - x))
+    grp <- data[1,'group']
+    newdata <- plyr::arrange(
+      transform(data, x = if(grp%%2==1) xminv else xmaxv), 
+      if(grp%%2==1) y else -y
+    )
+    newdata <- rbind(newdata[1, ], newdata, newdata[nrow(newdata), ], newdata[1, ])
+    newdata[c(1,nrow(newdata)-1,nrow(newdata)), 'x'] <- round(newdata[1, 'x']) 
+    if (length(draw_quantiles) > 0 & !scales::zero_range(range(data$y))) {
+      stopifnot(all(draw_quantiles >= 0), all(draw_quantiles <= 1))
+      quantiles <- ggplot2:::create_quantile_segment_frame(data, draw_quantiles)
+      aesthetics <- data[rep(1, nrow(quantiles)), setdiff(names(data), c("x", "y")), drop = FALSE]
+      aesthetics$alpha <- rep(1, nrow(quantiles))
+      both <- cbind(quantiles, aesthetics)
+      quantile_grob <- GeomPath$draw_panel(both, ...)
+      ggplot2:::ggname("geom_split_violin", 
+                       grid::grobTree(GeomPolygon$draw_panel(newdata, ...), quantile_grob))
+    } else {
+      ggplot2:::ggname("geom_split_violin", GeomPolygon$draw_panel(newdata, ...))
+    }
+  }
+)
+
+geom_split_violin <- function (mapping = NULL, 
+                               data = NULL, 
+                               stat = "ydensity", 
+                               position = "identity", ..., 
+                               draw_quantiles = NULL, 
+                               trim = TRUE, 
+                               scale = "area", 
+                               na.rm = FALSE, 
+                               show.legend = NA, 
+                               inherit.aes = TRUE) {
+  layer(data = data, 
+        mapping = mapping, 
+        stat = stat, 
+        geom = GeomSplitViolin, 
+        position = position, 
+        show.legend = show.legend, 
+        inherit.aes = inherit.aes, 
+        params = list(trim = trim, 
+                      scale = scale, 
+                      draw_quantiles = draw_quantiles, 
+                      na.rm = na.rm, ...)
+  )
+}
+```
+
+```{r Import Dataset for Main Project CSV }
+
+#Check Current Directory
+getwd()
+library(readr)
+Main_data_AA <- read_csv("/cloud/project/ADVANCE_Manuscript_Appendix/Gender Support Analysis/Main_data_AA_All.csv", 
+    col_types = cols(Value = col_number(), 
+        Year = col_character()))
+# View(Main_data_AA)
+
+
+
+# Make Levels for Pre on the left and Post on the Right
+Main_data_AA$Test <- factor(Main_data_AA$Test, levels=c('Pre','Post'))
+
+
+```
+
+```{r}
+
+# Load necessary libraries
+library(ggplot2)
+library(dplyr)
+
+# Function to prepare data
+prepare_data <- function() {
+  hdb_data <- data.frame(
+    semester = factor(
+      c("Fall 2019", "Fall 2021", 
+        "Spring 2022", "Fall 2022", 
+        "Spring 2023", "Fall 2023"), 
+      levels = c("Fall 2019", "Fall 2021", 
+                 "Spring 2022", "Fall 2022", 
+                 "Spring 2023", "Fall 2023")
+    ), 
+    PRE = c(4.47, 4.18, 4.63, 3.85, 3.65, 4.15),
+    POST = c(4.47, 3.82, 3.77, 3.38, 3.61, 3.88),
+    stringsAsFactors = FALSE
+  )
+  
+  hdb_data$change <- hdb_data$POST - hdb_data$PRE
+  hdb_data <- arrange(.data = hdb_data, change)
+  hdb_data$color <- ifelse(test = hdb_data$change > 0, 
+                           yes = "darkgreen", no = "darkgreen")
+  hdb_data$labels_PRE <- paste(hdb_data$PRE)
+  hdb_data$labels_POST <- paste(hdb_data$POST)
+  hdb_data$text_color_PRE <- ifelse(hdb_data$semester == "Fall 2019", "black", "black")
+  hdb_data$text_color_POST <- ifelse(hdb_data$semester == "Fall 2019", "black", "white")
+  
+  return(hdb_data)
+}
+
+# Function to create the plot
+create_plot <- function(data) {
+  point_size <- 10
+  line_size <- 1
+  gray <- "gray70"
+  
+  plot <- ggplot(data) +
+    geom_segment(aes(x = POST, xend = PRE, 
+                     y = factor(semester), yend = factor(semester)), 
+                 color = data$color, size = line_size) +
+    geom_point(aes(x = POST, y = semester), 
+               color = data$color, size = point_size) +
+    geom_point(aes(x = PRE, y = semester), 
+               color = gray, size = point_size) + 
+    theme_minimal()
+  
+  return(plot)
+}
+
+# Function to add labels to the plot
+add_labels <- function(plot, data) {
+  plot_labels <- plot + 
+    geom_text(aes(x = PRE, y = factor(semester), label = labels_PRE),
+              size = 3, color = ifelse(data$semester == "Fall 2019", "black", "black"), 
+              fontface = "bold", family = "sans", 
+              nudge_x = ifelse(data$PRE == 3.65, 0.01, 0)) + 
+    geom_text(aes(x = POST, y = semester, label = labels_POST),
+              size = 3, color = ifelse(data$semester == "Fall 2019", "black", "white"), 
+              fontface = "bold", family = "sans") 
+  
+  return(plot_labels)
+}
+
+# Function to clean the plot
+clean_plot <- function(plot) {
+  plot_clean <- plot +
+    theme(panel.grid = element_blank(),
+          axis.title = element_blank(),
+          axis.text.x = element_blank(),
+          axis.text.y = element_text(face = "bold", color = "gray30"),
+          legend.position = "bottom")
+  
+  return(plot_clean)
+}
+
+# Prepare the data
+data <- prepare_data()
+
+# Create the plot
+plot <- create_plot(data)
+
+# Add the labels with adjusted positions
+plot_labels <- add_labels(plot, data)
+
+# Clean the plot
+plot_clean <- clean_plot(plot_labels)
+
+# Display the plot
+#print(plot_clean)
+#print(plot_clean)
+ggsave(filename = "Gender_Support_Dumbbell_Plot.png", plot = plot_clean, width = 10, height = 6)
+
+
+```
+### Interpretation of the Dumbbell Plot for Gender Support Theme
+
+The dumbbell plot provides a visual representation of the changes in participants' perceptions of the Gender Support theme before and after attending the workshop across different semesters. Each dot represents the average score on a Likert scale, with the left (gray) dot representing the pre-test score and the right (green) dot representing the post-test score. The line connecting the dots indicates the direction and magnitude of the change.
+
+#### Semester-wise Analysis:
+
+1. **Fall 2019**:
+   - **Pre-test Score**: 4.47
+   - **Post-test Score**: 4.47
+   - **Change**: 0.00
+   - **Interpretation**: There was no change in participants' perceptions of Gender Support after the workshop. The were no POST questions collected during Fall 2019.
+
+2. **Fall 2021**:
+   - **Pre-test Score**: 4.18
+   - **Post-test Score**: 3.82
+   - **Change**: -0.36
+   - **Interpretation**: There was a moderate decrease in participants' perceptions of Gender Support after the workshop, indicating that the workshop may have led participants to adopt a more critical view of gender support issues.
+
+3. **Spring 2022**:
+   - **Pre-test Score**: 4.63
+   - **Post-test Score**: 3.77
+   - **Change**: -0.86
+   - **Interpretation**: The substantial decrease in perceptions of Gender Support suggests that the workshop significantly impacted participants' views, possibly by raising awareness of gender support challenges that participants had not previously considered.
+
+4. **Fall 2022**:
+   - **Pre-test Score**: 3.85
+   - **Post-test Score**: 3.38
+   - **Change**: -0.47
+   - **Interpretation**: There was a notable decrease in perceptions, indicating that the workshop effectively prompted participants to critically reassess their views on Gender Support.
+
+5. **Spring 2023**:
+   - **Pre-test Score**: 3.65
+   - **Post-test Score**: 3.61
+   - **Change**: -0.04
+   - **Interpretation**: The slight decrease in scores indicates a minimal impact of the workshop on participants' perceptions of Gender Support during this semester. The closeness of the pre- and post-test scores suggests that participants' views were not significantly altered by the workshop content.
+
+6. **Fall 2023**:
+   - **Pre-test Score**: 4.15
+   - **Post-test Score**: 3.88
+   - **Change**: -0.27
+   - **Interpretation**: A moderate decrease in perceptions suggests that the workshop had some impact on participants' views, but the change was not as pronounced as in some other semesters.
+
+### Overall Interpretation
+
+- **General Trend**: Across most semesters, there is a decrease in post-test scores compared to pre-test scores, indicating that the workshops generally led participants to critically reassess their views on Gender Support.
+- **Magnitude of Change**: The extent of the change varies, with Spring 2022 showing the most significant decrease and Spring 2023 showing the least.
+- **Impact of Workshops**: The workshops appear to be effective in raising awareness and promoting critical reflection on gender support issues, though the impact varies by semester. Factors such as workshop content, delivery, and participant characteristics could influence these variations.
+- **Future Improvements**: For semesters with minimal change (e.g., Fall 2019 and Spring 2023), it may be beneficial to review and enhance the workshop content to ensure it effectively engages participants and prompts meaningful reflection.
+
+### Conclusion
+
+The dumbbell plot analysis reveals that the workshops generally prompted participants to adopt a more critical perspective on Gender Support, with varying degrees of impact across different semesters. These insights can guide future improvements to the workshop to maximize its effectiveness in promoting gender support awareness and understanding.
+
+
+## Introduction
+
+This section provides an overview of the analysis related to the Climate
+Theme.
+
+## Data Preparatation
+
+
+## Data Visualization
+
+
+
+
+
+## Split Violin Plot Code to create the Violin Plot
+
+```{r Split Violin Climate Plot with title}
+
+# Color by PRE/POST TEST
+#plot_title1<-expression(
+#  paste("A&A participants Perceive",sep=" ", bold("Less Favorable Gender Support "))
+#)
+
+pt1 <- paste ("1", "Less", "Favorable", sep = "\n")
+pt7 <- paste("More", "Favorable", "7", sep="\n")
+##################################
+# Graph by Filter
+# Type = Race Support 
+Main_data_AA_filter<-Main_data_AA[Main_data_AA$Type =="Gender_Sup",]
+#
+##############
+# Graph by Two or More Filters
+#Main_data_AA_filter2<-subset(Main_data_AA,Type=="Race_Sup"&Year=="2019")
+###################################
+
+SplitV<-ggplot(Main_data_AA_filter, aes(x = Type, y = Value, fill = Test))+
+  geom_split_violin(trim = FALSE, alpha = .4)+
+  geom_boxplot(width = .2, alpha = .6,
+               position = position_dodge(.25))+
+  scale_fill_viridis_d(option = "E") +
+  stat_summary(fun = "mean", geom = "point",
+               position = position_dodge(width = 0.25)) +
+  stat_summary(fun.data = "mean_se", geom = "errorbar", width = .1,
+               position = position_dodge(width = 0.25))+
+
+scale_y_continuous(name = "Gender Support Rating",
+                     breaks = c(0,2,3,4,5,6,7),
+                     labels = c(pt1, 2, 3, 4, 5, 6, pt7),
+                     limits = c(-2, 10)) +
+  #guides(fill = FALSE)+
+  theme_void()+
+  theme(
+  legend.position = "right",
+  plot.title = element_text(family="sans",size=12, face="bold"),
+   panel.grid = element_blank(),
+  plot.caption = element_text(family = "sans",face = "italic",size=18, color = "blue",hjust=c(0,.1),vjust=c(.5,0)),
+  plot.caption.position = "panel",
+   axis.text.y = element_text(vjust=0, size = 10),
+   axis.text.x = element_text(size = 10),
+    axis.title = element_blank()
+ )#+
+  #ggtitle(plot_title1)
+
+```
+
+## This Saves the Violin Plot
+
+```{r Save A&A Aggregate Gender Support Violin Plot}
+# Export PNG
+ggsave(plot=SplitV, filename="Gender_Support_V.png", 
+       height=4.5, width=6.25, dpi=350, units="in")
+# Summary Violin Plot Data
+
+
+```
+
+### Benefits of Using Violin Plots Over Box Plots
+
+Violin plots offer several advantages over traditional box plots,
+particularly for analyzing survey data with pre- and post-test measures:
+
+1.  **Distribution Visualization**: Violin plots combine the features of
+    box plots and density plots, providing a richer understanding of the
+    data distribution. They show the full distribution of the data,
+    highlighting areas of higher and lower density.
+
+2.  **Symmetry and Skewness**: Violin plots make it easier to see if the
+    data is symmetric or skewed, offering insights into the underlying
+    distribution that might be missed with box plots.
+
+3.  **Multi-modal Distributions**: Unlike box plots, violin plots can
+    display multi-modal distributions, where data has multiple peaks,
+    revealing more about the underlying structure of the data.
+
+4.  **Enhanced Comparisons**: Violin plots facilitate comparisons
+    between groups by showing both the summary statistics (median,
+    quartiles) and the distribution shape, making it easier to identify
+    patterns and differences.
+
+### Interpretation of the Violin Plot
+
+#### General Observation
+
+The provided violin plot displays the pre-test (left, blue) and
+post-test (right, yellow) scores for the Climate theme across all
+semesters. The plot includes the distribution density, box plots with
+median and interquartile ranges, and individual data points for more
+granular insights.
+
+### Interpretation of the Violin Plot for Gender Support Theme
+
+The violin plot provides a detailed visualization of the distribution of pre-test and post-test scores for the Gender Support theme. The plot shows the density of the data at different values, with the width of the plot indicating the frequency of scores. The box plots inside the violin plots give additional information about the median, interquartile range (IQR), and potential outliers.
+
+#### Trends and Patterns:
+
+1. **Pre-test Scores (Blue)**:
+   - **Median and IQR**: The median pre-test score is shown by the central line in the box plot within the blue violin plot. The interquartile range (IQR) is represented by the box, indicating where the middle 50% of the data lies.
+   - **Distribution**: The pre-test scores have a concentrated peak around the median, indicating that many participants initially rated their perception of Gender Support highly.
+   - **Outliers**: There are a few outliers on the lower end of the scale, indicating that some participants had lower perceptions of Gender Support before attending the workshop.
+
+2. **Post-test Scores (Yellow)**:
+   - **Median and IQR**: The median post-test score is shown by the central line in the box plot within the yellow violin plot. The IQR is represented by the box.
+   - **Distribution**: The post-test scores have a broader distribution compared to the pre-test scores, with the density spread out more evenly across the range. This indicates increased variability in participants' perceptions after the workshop.
+   - **Outliers**: There are fewer outliers in the post-test scores, suggesting that the workshop had a normalizing effect on some participants' views.
+
+#### Key Insights:
+
+1. **Impact on Perceptions**:
+   - The shift from a concentrated peak in the pre-test scores to a broader distribution in the post-test scores suggests that the workshop effectively prompted participants to reassess their views on Gender Support. This indicates that the workshop content was impactful in raising awareness and encouraging critical reflection.
+
+2. **Increased Variability**:
+   - The increased variability in the post-test scores shows that participants had diverse reactions to the workshop content. Some participants might have become more critical, while others might have reinforced their initial perceptions. This highlights the importance of addressing diverse perspectives in workshop content to ensure that all participants can benefit.
+
+3. **Median Shift**:
+   - The slight decrease in the median score from pre-test to post-test suggests that, on average, participants' perceptions of Gender Support became slightly more critical. This is consistent with the goal of promoting critical thinking and awareness of gender support issues.
+
+4. **Box Plot Analysis**:
+   - The box plots within the violin plots show that the central tendency (median) shifted slightly downwards from pre-test to post-test, while the spread (IQR) became wider. This indicates that while the workshop was effective in shifting perceptions, it also introduced a greater diversity of opinions.
+
+5. **Workshop Effectiveness**:
+   - The workshop appears to be effective in challenging and broadening participants' perspectives on Gender Support. The results suggest that the workshop successfully engaged participants in critical discussions, leading to more nuanced and varied perceptions.
+
+### Conclusion
+
+The violin plot analysis reveals that the Gender Support workshop had a significant impact on participants' perceptions. The broader distribution of post-test scores indicates that the workshop prompted critical reflection and diverse reactions among participants. While the slight decrease in the median score suggests a more critical view of Gender Support, the increased variability highlights the importance of addressing diverse perspectives to ensure comprehensive understanding and support. These insights can guide future improvements to the workshop content and delivery to maximize its effectiveness and inclusivity.
+
+```{r}
+
+```
+
+## Statistical Analysis
+
+Linear Mixed Models In this study, we employed Linear Mixed Models
+(LMMs) to analyze the pre- and post-survey data. LMMs are particularly
+suited for our data due to several reasons. Firstly, LMMs can
+effectively handle repeated measures, making them ideal for pre/post
+survey designs. This allows us to account for the correlation between
+repeated measures within the same participants. Secondly, LMMs are
+robust to missing data, which is crucial as participants were allowed to
+skip any question they wanted. Thirdly, by incorporating random effects,
+LMMs account for variability between participants and within
+participants over time, providing more accurate and reliable estimates.
+Lastly, LMMs accommodate the nested structure of our data, where
+responses are nested within participants, and participants are nested
+within different survey themes. These characteristics make LMMs an
+optimal choice for our analysis, aligning with recommendations in
+statistical literature (Fitzmaurice, Laird, & Ware, 2011; Rabe-Hesketh &
+Skrondal, 2012).
+
+#Why Linear Mixed Models (LMMs) Are Appropriate Handling Repeated
+Measures: LMMs are well-suited for pre/post survey data because they can
+handle repeated measures on the same subjects. This is crucial when
+participants' responses are collected at multiple time points.
+Flexibility with Missing Data: LMMs can handle missing data more
+effectively than traditional methods like ANOVA. Since participants were
+allowed to skip questions, LMMs can accommodate this by using all
+available data without excluding entire cases due to missing values.
+Incorporating Random Effects: LMMs allow for the inclusion of random
+effects, which can account for variability between subjects
+(participants) and within subjects (different time points). This is
+especially useful when analyzing grouped questions by theme, as it
+acknowledges that responses may vary not only due to the intervention
+but also due to individual differences. Accounting for Nested Data
+Structures: In survey data, responses might be nested within
+participants. LMMs can account for this hierarchical structure,
+providing more accurate estimates of the effects of the intervention.
+
+# References
+
+1.)Statistical Textbooks: Applied Longitudinal Analysis" by Garrett M.
+Fitzmaurice, Nan M. Laird, and James H. Ware: This book provides
+comprehensive coverage of methods for analyzing longitudinal data,
+including LMMs. It discusses the handling of missing data and repeated
+measures, which are relevant to your study.<br> Multilevel and
+Longitudinal Modeling Using Stata" by Sophia Rabe-Hesketh and Anders
+Skrondal: This book is a practical guide to multilevel and longitudinal
+modeling, with examples using Stata. It explains the application of LMMs
+in different contexts, including survey data.<br> 2.) Survey Analysis
+Publications: #Survey Methodology" by Robert M. Groves, Floyd J. Fowler
+Jr., Mick P. Couper, James M. Lepkowski, Eleanor Singer, and Roger
+Tourangeau: This book covers various aspects of survey methodology,
+including data analysis techniques suitable for complex survey data. 3.)
+Program Assessment Publications: #Program Evaluation: An Introduction to
+an Evidence-Based Approach" by David Royse, Bruce A. Thyer, Deborah K.
+Padgett, and T. K. Logan: This book discusses different methods for
+program evaluation, including statistical analyses of survey data.<br>
+4.) Race, Ethnicity, and Quantitative Methodology Publications: \#"Race
+and Ethnicity in the Study of Family and School Contexts" by Alan Booth,
+Ann C. Crouter, and Nancy Landale: This publication includes discussions
+on quantitative methodologies used in race and ethnicity studies, which
+often involve complex survey data.<br>
+
+## Step By Step Workflow for LMM in R
+
+1.) Install and Load Required Packages 2.) Load the Data 3.) Filter Data
+for the Climate Theme 4.) Fit the Linear Mixed Model
+
+##Explanation of the Model: A.Value \~ Test: We are modeling the average
+score (Value) as a function of the test type (Test), which indicates
+whether the score is from the pre-test or post-test. B. (1 \| Year): We
+include a random intercept for each year to account for variability
+between different years. C. (1 \| semester): We include a random
+intercept for each semester to account for variability within semesters.
+##Interpreting the Results: The summary function provides a detailed
+summary of the model. Key components to interpret:
+
+A.Fixed Effects: These are the estimated effects of the predictors (Test
+in this case). The estimate for Testpost will indicate the difference in
+average scores between the pre-test and post-test.
+
+B.Random Effects: These provide estimates of the variability (standard
+deviation) between the random intercepts (years and semesters).
+
+C.Residuals: These provide information about the variability of the
+residuals (differences between observed and predicted values).
+
+```{r Linear Mixed Model }
+install.packages("lme4")
+install.packages("lmerTest")
+install.packages("dplyr")
+install.packages("readr")
+library(lme4)
+library(lmerTest)
+library(dplyr)
+library(readr)
+
+
+# Load the data
+data <- read_csv("Main_data_AA_All.csv")
+
+# View the first few rows of the data
+head(data)
+
+# Filter data for the Gender theme
+gender_sup_data <- data %>% filter(Type == "Gender_Sup")
+
+# View the first few rows of the filtered data
+head(gender_sup_data)
+
+# Fit the Linear Mixed Model
+lmm_gender_sup <- lmer(Value ~ Test + (1 | Year) + (1 | Semester), data = gender_sup_data)
+
+# Summarize the model
+summary(lmm_gender_sup)
+
+
+```
+
+```{r Make a Table of the LMM results}
+install.packages("broom.mixed")
+install.packages("gt")
+library(broom.mixed)
+library(gt)
+
+# Tidy the model output
+tidy_lmm <- tidy(lmm_gender_sup, effects = "fixed")
+
+# Create a gt table from the tidy data frame
+gt_table <- tidy_lmm %>%
+  gt() %>%
+  tab_header(
+    title = "Linear Mixed Model Results for Climate Theme",
+    subtitle = "Fixed Effects Estimates"
+  ) %>%
+  fmt_number(
+    columns = vars(estimate, std.error, statistic),
+    decimals = 2
+  ) %>%
+  cols_label(
+    term = "Term",
+    estimate = "Estimate",
+    std.error = "Std. Error",
+    statistic = "t value",
+    p.value = "p value"
+  ) %>%
+  tab_style(
+    style = list(
+      cell_fill(color = "dodgerblue3"),
+      cell_text(weight = "bold", color = "white")
+    ),
+    locations = cells_column_labels(columns = everything())
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = everything()
+  ) %>%
+  tab_options(
+    table.border.top.color = "white",
+    table.border.bottom.color = "white",
+    table.border.left.color = "white",
+    table.border.right.color = "white",
+    column_labels.border.top.color = "white",
+    column_labels.border.bottom.color = "white",
+    data_row.padding = px(5)
+  )
+
+# Print the gt table
+print(gt_table)
+```
+
+
+
+### Interpretation of Fixed Effects for Gender Support Theme
+
+1. **Intercept (Estimate = 3.6628)**:
+   - **Estimate**: The estimated average score for the post-test is 3.6628. This is the baseline against which other effects are compared.
+   - **Std. Error**: The standard error of the intercept is 0.1148.
+   - **t value**: The t-value for the intercept is 31.903, indicating the estimate is 31.903 standard errors away from zero.
+   - **Pr(>|t|)**: The p-value is < 2e-16, which is extremely small, indicating that the intercept is highly significant (p < 0.001).
+
+2. **TestPre (Estimate = 0.4234)**:
+   - **Estimate**: The estimated difference between the pre-test and post-test scores is 0.4234. Since the estimate is positive, it indicates that, on average, the pre-test scores are 0.4234 points higher than the post-test scores.
+   - **Std. Error**: The standard error of the TestPre effect is 0.1539.
+   - **t value**: The t-value for TestPre is 2.752, indicating the estimate is 2.752 standard errors away from zero.
+   - **Pr(>|t|)**: The p-value is 0.00647, which is less than 0.01, indicating that this effect is highly significant (p < 0.01).
+
+### Interpretation of the Random Effects
+
+- **Year (Intercept)**: The variance of the random intercept for Year is 0.000 with a standard deviation of 0.000. This suggests there is no variability in the average scores between different years.
+- **Semester (Intercept)**: The variance of the random intercept for Semester is 0.000 with a standard deviation of 0.000. This indicates no variability in the average scores between different semesters.
+- **Residual**: The residual variance is 1.186 with a standard deviation of 1.089, representing the within-group variability.
+
+### Description of the Workshop's Effects
+
+Based on the results of the Linear Mixed Model, we can draw several conclusions about the effects of the workshop on participants' perceptions of the Gender Support theme:
+
+1. **Baseline Perceptions (Intercept)**:
+   - The estimated average score for the post-test is 3.6628 (t = 31.903, p < 0.001). This suggests that, after the workshop, participants' perceptions of the Gender Support theme were moderately positive, with an average score close to 3.66 on a Likert scale.
+
+2. **Impact of the Workshop (TestPre)**:
+   - The estimated difference between the pre-test and post-test scores is 0.4234 (t = 2.752, p < 0.01). This positive coefficient indicates that, on average, participants' perceptions of the Gender Support theme were higher before attending the workshop compared to after. The statistically significant difference suggests that the workshop had a noticeable impact, leading to a reduction in scores.
+
+3. **Interpretation of the Results**:
+   - The significant reduction in post-test scores (by 0.4234 points on average) suggests that the workshop may have led participants to reassess their initial perceptions of the Gender Support theme. This could be due to increased awareness of issues or challenges related to the Gender Support theme that were highlighted during the workshop. Participants may have developed a more critical or nuanced understanding, resulting in lower post-test scores.
+
+4. **Random Effects**:
+   - There is no variability in the average scores between different years and semesters, as indicated by the random intercepts for Year and Semester. This suggests that the workshop's impact remains consistent across different years and semesters.
+
+5. **Practical Implications**:
+   - These findings highlight the importance of continuous assessment and improvement of the workshop content. The decrease in scores could signal the need to address specific concerns raised during the workshop or to provide additional support to participants as they process new information. Understanding why perceptions decreased can help refine the workshop to better meet participants' needs and expectations.
+
+6. **Conclusion**:
+   - In conclusion, while participants initially had a moderately positive perception of the Gender Support theme, the workshop appears to have led to a significant decrease in their ratings. This suggests that the workshop effectively challenged participants' pre-existing views, promoting a more critical perspective on the Gender Support theme. Future workshops should aim to balance raising awareness with providing solutions and support to address any concerns that arise.
+
+### Summary of Key Points:
+
+- **Intercept**: Post-test scores average around 3.6628, indicating moderately positive perceptions after the workshop.
+- **TestPre**: Pre-test scores are, on average, 0.4234 points higher than post-test scores, indicating a significant reduction in perceptions due to the workshop.
+- **Significance**: Both fixed effects (Intercept and TestPre) are highly significant (p < 0.01).
+- **Random Effects**: No variability exists between different years and semesters.
+  
+These interpretations provide a comprehensive understanding of the workshop's impact on participants' perceptions of the Gender Support theme, guiding future improvements and ensuring effective workshop content delivery.
+## Overall Discussion
+
+Discuss the insights and the findings based on the visualizations. In
+post processing, images were inserted into Google Slides. Tables and
+Titles were added. Then screenshots were imported into the document.
+Certainly! Let's interpret the results of your Linear Mixed Model (LMM)
+for the Climate theme, focusing on the fixed effects, t-values,
+statistical significance with p-values, and then describe the workshop's
+effects.
+
+## Cohen's D Effect Statistical Analysis
+```{r}
+install.packages("effsize")
+library(effsize)
+
+Main_data_AA <- read_csv("Main_data_AA_All.csv")
+#Checking Effect Size to match visual pattern Use Cohen's D to calculate unusual Patterns
+#Main_data_AA
+#view(Main_data_AA)
+
+# Climate Cohen's d Effect Size
+# Fall 2021
+Main_data_AA_f21<-subset(Main_data_AA,Type=="Gender_Sup"&Year=="2021"&Semester=="Fall")
+Main_data_AA_f21pre<-subset(Main_data_AA_f21,Test=="Pre")
+Main_data_AA_f21post<-subset(Main_data_AA_f21,Test=="Post")
+cohen.dF2021<-cohen.d(Main_data_AA_f21pre$Value,Main_data_AA_f21post$Value)
+
+# Climate Cohen's d Effect Size
+# Spring 2022
+Main_data_AA_s22<-subset(Main_data_AA,Type=="Gender_Sup"&Year=="2022"&Semester=="Spring")
+Main_data_AA_s22pre<-subset(Main_data_AA_s22,Test=="Pre")
+Main_data_AA_s22post<-subset(Main_data_AA_s22,Test=="Post")
+cohen.dSp2022<-cohen.d(Main_data_AA_s22pre$Value,Main_data_AA_s22post$Value)
+
+# Climate Cohen's d Effect Size 
+# Fall 2022
+Main_data_AA_f22<-subset(Main_data_AA,Type=="Gender_Sup"&Year=="2022"&Semester=="Fall")
+Main_data_AA_f22pre<-subset(Main_data_AA_f22,Test=="Pre")
+Main_data_AA_f22post<-subset(Main_data_AA_f22,Test=="Post")
+cohen.dF2022<-cohen.d(Main_data_AA_f22pre$Value,Main_data_AA_f22post$Value)
+
+# Climate Cohen's d Effect Size 
+# Spring 2023
+Main_data_AA_s23<-subset(Main_data_AA,Type=="Gender_Sup"&Year=="2023"&Semester=="Spring")
+Main_data_AA_s23pre<-subset(Main_data_AA_s23,Test=="Pre")
+Main_data_AA_s23post<-subset(Main_data_AA_s23,Test=="Post")
+cohen.dSp2023<-cohen.d(Main_data_AA_s23pre$Value,Main_data_AA_s23post$Value)
+
+# Climate Cohen's d Effect Size 
+# Fall 2023
+Main_data_AA_f23<-subset(Main_data_AA,Type=="Gender_Sup"&Year=="2023"&Semester=="Fall")
+Main_data_AA_f23pre<-subset(Main_data_AA_f23,Test=="Pre")
+Main_data_AA_f23post<-subset(Main_data_AA_f23,Test=="Post")
+cohen.dF2023<-cohen.d(Main_data_AA_f23pre$Value,Main_data_AA_f23post$Value)
+
+# Cohen's D Effect By Semester
+cohen.dF2021
+cohen.dSp2022
+cohen.dF2022
+cohen.dSp2023
+cohen.dF2023
+
+
+```
+Cohen's d is a measure of effect size used to indicate the standardized difference between two means. It is particularly useful for understanding the practical significance of differences observed in data, supplementing the p-values from hypothesis tests. Here's a brief discussion on the appropriateness of Cohen's d for the data:
+
+#Appropriateness of Cohen's d
+When Cohen's d is Appropriate:
+
+#Two Groups Comparison: 
+Cohen's d is typically used to compare the means of two groups, such as pre-test vs. post-test scores.
+#Understanding Effect Size: 
+It provides a standardized measure of the magnitude of differences, helping to interpret the practical significance of the results.
+#In This Context:
+Given that the data involve pre-test and post-test scores, calculating Cohen's d can be appropriate to quantify the effect size of the workshop. However, it should be noted that Cohen's d is usually applied in the context of independent samples or paired samples t-tests. In this case, where data may have repeated measures and nested structures, it can still be useful but should be interpreted with some caution.
+
+### Interpretation of Cohen's d for Workshop Participants and Impact on Gender Support
+
+Cohen's d is a measure of effect size that quantifies the difference between two means in terms of standard deviations. It is used to understand the practical significance of the difference between pre-test and post-test scores for each semester in your workshop. Here's what the results mean for the participants and the workshops:
+
+1. **Fall 2021 (Cohen’s d = 0.2928343, Small)**:
+   - **Interpretation**: The workshop had a small effect size, indicating a limited impact on participants' perceptions of Gender Support. The change in views was present but not substantial.
+   - **Implications**: The small effect size suggests that while the workshop influenced participants' attitudes to some extent, there is room for improvement in the content or delivery to achieve a greater impact.
+
+2. **Spring 2022 (Cohen’s d = 1.078753, Large)**:
+   - **Interpretation**: The workshop had a large effect size, indicating a significant impact on participants' perceptions of Gender Support. The change in views was substantial.
+   - **Implications**: The large effect size demonstrates the success of the workshop in Spring 2022. This effectiveness could be attributed to the content, delivery, or specific cohort of participants. It is essential to analyze what worked well during this semester to replicate this success in future workshops.
+
+3. **Fall 2022 (Cohen’s d = 0.4818293, Small)**:
+   - **Interpretation**: The workshop had a small effect size, indicating a limited impact on participants' perceptions of Gender Support. The change in views was present but not substantial.
+   - **Implications**: The small effect size suggests that while the workshop was somewhat effective, there is potential to further refine and improve the program to achieve a larger impact.
+
+4. **Spring 2023 (Cohen’s d = 0.03238258, Negligible)**:
+   - **Interpretation**: The negligible effect size suggests that the workshop had little to no impact on participants' perceptions of Gender Support. The pre-test and post-test scores were very similar.
+   - **Implications**: The negligible effect size indicates a need for a thorough review of the workshop. Factors such as engagement, relevance of content, or external influences might have affected its impact. Adjustments are necessary to enhance the workshop's effectiveness for future participants.
+
+5. **Fall 2023 (Cohen’s d = 0.2571503, Small)**:
+   - **Interpretation**: The workshop had a small effect size, indicating a limited impact on participants' perceptions of Gender Support. The change in views was present but not substantial.
+   - **Implications**: The small effect size indicates a need to review the workshop's content and methodology to enhance its effectiveness. Additional support or interactive elements might be necessary to engage participants more deeply.
+
+### Summary
+
+The Cohen's d results provide valuable insights into the effectiveness of the workshops across different semesters:
+
+- **Small Effect Sizes (Fall 2021, Fall 2022, Fall 2023)**: These semesters showed a limited impact, indicating that the workshops influenced participants' attitudes but could benefit from further enhancements.
+- **Large Effect Size (Spring 2022)**: The significant impact highlights the success of the workshop during this semester. Understanding the factors contributing to this success can help replicate it in future sessions.
+- **Negligible Effect Size (Spring 2023)**: The minimal impact indicates the need for a detailed review and substantial adjustments to the workshop.
+
+### Implications for Future Workshops
+
+- **Content Improvement**: For semesters with small or negligible effect sizes, reviewing and enhancing the workshop content can help increase its effectiveness. This may involve incorporating more engaging activities, providing additional support, or addressing specific concerns raised by participants.
+- **Successful Strategies**: Analyzing the factors that contributed to the large effect size in Spring 2022 can help identify successful strategies that can be replicated in future workshops.
+- **Participant Engagement**: Ensuring that the workshop content is relevant and engaging for participants is crucial. This might involve customizing the content to address the specific needs and interests of different participant groups.
+
+By understanding the impact of the workshops on participants' perceptions of Gender Support, you can make informed decisions to improve the content and delivery of future workshops, ultimately enhancing their effectiveness and ensuring that they meet participants' needs and expectations.
+## Conclusion
+
+### Summary of Key Takeaways from the Gender Support Analysis
+
+#### 1. Dumbbell Plot Interpretation
+- **Overall Trend**: Most sessions show a decrease in post-test scores compared to pre-test scores, indicating that the workshops generally led participants to reassess their views on the Gender Support theme.
+- **Magnitude of Change**: The magnitude of change varies across semesters, with some sessions (e.g., Spring 2022, Fall 2022) showing more significant decreases than others. This variability could be due to differences in workshop delivery, participant characteristics, or external factors influencing perceptions.
+- **Critical Reflection**: The consistent decrease in scores suggests that the workshops were effective in promoting critical reflection among participants, encouraging them to adopt a more nuanced and critical perspective on the Gender Support theme.
+- **Future Improvements**: Sessions with minimal changes (e.g., Spring 2023, Fall 2019) may benefit from a review and enhancement of the workshop content to ensure it effectively engages participants and prompts reflection.
+
+#### 2. Violin Plot Interpretation
+- **Pre-test Scores**: The pre-test scores are concentrated around the median, indicating a general consensus among participants with initially positive perceptions of the Gender Support theme.
+- **Post-test Scores**: The post-test scores show a broader distribution, with a lower median, suggesting a shift in perceptions after the workshop. This indicates increased critical reflection and varied responses.
+- **Increased Variability**: The broader distribution and wider interquartile range (IQR) in post-test scores suggest that the workshop's impact varied among participants, leading to a range of perceptions.
+- **Implications**: The results highlight the effectiveness of the workshops in challenging participants' pre-existing views and promoting a more critical understanding. However, the variability suggests the need for tailored content to address diverse perspectives and provide additional support where needed.
+
+#### 3. Linear Mixed Model (LMM) Analysis
+- **Baseline Perceptions (Intercept)**: The estimated average post-test score is 3.6628, indicating moderately positive perceptions after the workshop.
+- **Impact of the Workshop (TestPre)**: The pre-test scores are, on average, 0.4234 points higher than the post-test scores, indicating a significant reduction in perceptions due to the workshop.
+- **Statistical Significance**: Both the intercept and the TestPre effect are highly significant (p < 0.01), indicating that the observed changes are unlikely to have occurred by chance.
+- **Random Effects**: No variability exists between different years and semesters, suggesting that the overall trend of decreased scores is consistent across different time periods.
+- **Implications**: The LMM results suggest that the workshops effectively challenged participants' pre-existing views, promoting a more critical perspective on the Gender Support theme. Future workshops should aim to balance raising awareness with providing solutions and support to address any concerns that arise.
+
+#### 4. Cohen's d Analysis
+- **Fall 2021 (Small, d = 0.2928)**: The workshop had a small impact, suggesting a limited but present influence on participants' views, with room for improvement.
+- **Spring 2022 (Large, d = 1.0788)**: The significant impact highlights the success of the workshop, with the need to understand and replicate the factors contributing to this success.
+- **Fall 2022 (Small, d = 0.4818)**: The workshop had a small impact, indicating a limited influence on participants' views, similar to Fall 2021.
+- **Spring 2023 (Negligible, d = 0.0324)**: The minimal impact suggests a thorough review and substantial adjustments to the workshop are necessary.
+- **Fall 2023 (Small, d = 0.2572)**: The workshop had a small impact, indicating a limited influence on participants' views.
+- **Fall 2019 (NA)**: No post-test data was collected, indicating the importance of comprehensive data collection in future workshops.
+
+### Conclusion
+The analysis of the Gender Support theme across different semesters provides valuable insights into the effectiveness of the workshops:
+- **Effectiveness in Promoting Critical Reflection**: The workshops generally led to a more critical perspective among participants, as indicated by the decrease in post-test scores and increased variability.
+- **Variability in Impact**: The impact varied across semesters, with some sessions showing significant changes and others showing minimal changes, highlighting the need for continuous assessment and improvement.
+- **Statistical and Practical Significance**: The LMM and Cohen's d analyses confirm the statistical and practical significance of the workshops' impact, emphasizing the need for tailored content and support to enhance effectiveness.
+- **Future Directions**: To maximize the impact of future workshops, it is essential to understand and replicate successful strategies, address diverse perspectives, and provide comprehensive support to participants.
+
+## Session Information
+
+```{r}
+sessionInfo()
+```
+

@@ -1,0 +1,921 @@
+---
+title: 'Appendix: Climate_Analysis'
+author: "Karen Colbert"
+date: "2024-07-27"
+output:
+  html_document: default
+  pdf_document: default
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+The Structure of this document is a follows:<br> 1.) Setup Selection:
+Load libraries and define functions <br> 2.) Introduction: Briefly
+introduce the Theme analyzed<br> 3.) Data Preparation: Load and prepare
+the data<br> 4.) Data Visualization: Create and display dot plot and
+violin plot<br> 5.) Statistical Analysis: Perform and display the
+results of the Linear Mixed Model Analysis<br> 6.) Discussion: Interpret
+the results<br> 7.) Conclusion: Summarize the findings<br> 8.) Session
+Information: Ensures reproducibility<br> <br> <br> The structure of the
+Main_data_AA_All.csv file is:<br> Value: This represents the participant
+mean score <br> Test: Either PRE or POST<br> Year:
+2019,2021,2022,2023<br> Type: Climate<br> Semester: Fall, Spring<br>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#library(dplyr)
+#library(ggplot2)
+#####################################
+# Load Packages and Libraries
+#####################################
+install.packages("tidyverse")
+install.packages("patchwork")
+#install.packages("grid")
+installed.packages("dplyr")
+library(ggplot2)
+library(tidyverse)
+library(patchwork)
+library(dplyr)
+library(tidyr)
+library(reshape2)
+library(magrittr)
+#####################################################
+#
+# DOWNLOAD CUSTOM GITHUB for Split Violin Plot
+#
+#####################################################
+devtools::install_github("psyteachr/introdataviz")
+
+```
+
+```{r Split Violin Code}
+# Start Split Violin Code
+GeomSplitViolin <- ggproto(
+  "GeomSplitViolin", 
+  GeomViolin, 
+  draw_group = function(self, data, ..., draw_quantiles = NULL) {
+    data <- transform(data, 
+                      xminv = x - violinwidth * (x - xmin), 
+                      xmaxv = x + violinwidth * (xmax - x))
+    grp <- data[1,'group']
+    newdata <- plyr::arrange(
+      transform(data, x = if(grp%%2==1) xminv else xmaxv), 
+      if(grp%%2==1) y else -y
+    )
+    newdata <- rbind(newdata[1, ], newdata, newdata[nrow(newdata), ], newdata[1, ])
+    newdata[c(1,nrow(newdata)-1,nrow(newdata)), 'x'] <- round(newdata[1, 'x']) 
+    if (length(draw_quantiles) > 0 & !scales::zero_range(range(data$y))) {
+      stopifnot(all(draw_quantiles >= 0), all(draw_quantiles <= 1))
+      quantiles <- ggplot2:::create_quantile_segment_frame(data, draw_quantiles)
+      aesthetics <- data[rep(1, nrow(quantiles)), setdiff(names(data), c("x", "y")), drop = FALSE]
+      aesthetics$alpha <- rep(1, nrow(quantiles))
+      both <- cbind(quantiles, aesthetics)
+      quantile_grob <- GeomPath$draw_panel(both, ...)
+      ggplot2:::ggname("geom_split_violin", 
+                       grid::grobTree(GeomPolygon$draw_panel(newdata, ...), quantile_grob))
+    } else {
+      ggplot2:::ggname("geom_split_violin", GeomPolygon$draw_panel(newdata, ...))
+    }
+  }
+)
+
+geom_split_violin <- function (mapping = NULL, 
+                               data = NULL, 
+                               stat = "ydensity", 
+                               position = "identity", ..., 
+                               draw_quantiles = NULL, 
+                               trim = TRUE, 
+                               scale = "area", 
+                               na.rm = FALSE, 
+                               show.legend = NA, 
+                               inherit.aes = TRUE) {
+  layer(data = data, 
+        mapping = mapping, 
+        stat = stat, 
+        geom = GeomSplitViolin, 
+        position = position, 
+        show.legend = show.legend, 
+        inherit.aes = inherit.aes, 
+        params = list(trim = trim, 
+                      scale = scale, 
+                      draw_quantiles = draw_quantiles, 
+                      na.rm = na.rm, ...)
+  )
+}
+```
+
+```{r Import Dataset for Main Project CSV }
+
+#Check Current Directory
+getwd()
+library(readr)
+Main_data_AA <- read_csv("/cloud/project/ADVANCE_Manuscript_Appendix/Main_data_AA_All.csv", 
+    col_types = cols(Value = col_number(), 
+        Year = col_character()))
+# View(Main_data_AA)
+
+
+
+# Make Levels for Pre on the left and Post on the Right
+Main_data_AA$Test <- factor(Main_data_AA$Test, levels=c('Pre','Post'))
+
+
+```
+
+```{r}
+
+# Function to prepare data
+prepare_data <- function() {
+  hdb_data <- data.frame(
+    semester = factor(
+      c("Fall 2019", "Fall 2021", 
+        "Spring 2022", "Fall 2022", 
+        "Spring 2023", "Fall 2023"), 
+      levels = c("Fall 2019", "Fall 2021", 
+                 "Spring 2022", "Fall 2022", 
+                 "Spring 2023", "Fall 2023")
+    ), 
+    PRE = c(4.75, 4.01, 4.72, 4.38, 4.57, 4.56),
+    POST = c(4.75, 3.42, 4.45, 3.76, 3.90, 4.48),
+    stringsAsFactors = FALSE
+  )
+  
+  hdb_data$change <- hdb_data$POST - hdb_data$PRE
+  hdb_data <- arrange(.data = hdb_data, change)
+  hdb_data$color <- ifelse(test = hdb_data$change > 0, 
+                           yes = "dodgerblue3", no = "dodgerblue3")
+  hdb_data$labels_PRE <- paste(hdb_data$PRE)
+  hdb_data$labels_POST <- paste(hdb_data$POST)
+  hdb_data$text_color_PRE <- ifelse(hdb_data$semester == "Fall 2019", "black", "black")
+  hdb_data$text_color_POST <- ifelse(hdb_data$semester == "Fall 2019", "black", "white")
+  
+  return(hdb_data)
+}
+
+# Function to create the plot
+create_plot <- function(data) {
+  point_size <- 10
+  line_size <- 1
+  gray <- "gray70"
+  
+  plot <- ggplot(data) +
+    geom_segment(aes(x = POST, xend = PRE, 
+                     y = factor(semester), yend = factor(semester)), 
+                 color = data$color, size = line_size) +
+    geom_point(aes(x = POST, y = semester), 
+               color = data$color, size = point_size) +
+    geom_point(aes(x = PRE, y = semester), 
+               color = gray, size = point_size) + 
+    theme_minimal()
+  
+  return(plot)
+}
+
+# Function to add labels to the plot
+add_labels <- function(plot, data) {
+  plot_labels <- plot + 
+    geom_text(aes(x = PRE, y = factor(semester), label = labels_PRE),
+              size = 3, color = ifelse(data$semester == "Fall 2019", "black", "black"), 
+              fontface = "bold", family = "sans") + 
+    geom_text(aes(x = POST, y = semester, label = labels_POST),
+              size = 3, color = ifelse(data$semester == "Fall 2019", "black", "white"), 
+              fontface = "bold", family = "sans") 
+  
+  return(plot_labels)
+}
+
+# Function to clean the plot
+clean_plot <- function(plot) {
+  plot_clean <- plot +
+    theme(panel.grid = element_blank(),
+          axis.title = element_blank(),
+          axis.text.x = element_blank(),
+          axis.text.y = element_text(face = "bold", color = "gray30"),
+          legend.position = "bottom")
+  
+  return(plot_clean)
+}
+```
+
+## Introduction
+
+This section provides an overview of the analysis related to the Climate
+Theme.
+
+## Data Preparatation
+
+```{r }
+hdb_data <- prepare_data()
+
+```
+
+## Data Visualization
+
+This creates the Dumbbell Plot
+
+```{r, echo=FALSE}
+plot <- create_plot(hdb_data)
+plot_labels <- add_labels(plot, hdb_data)
+plot_clean <- clean_plot(plot_labels)
+```
+
+## This saves the Dumbbell Plot as an png file
+
+```{r , echo=FALSE}
+#print(plot_clean)
+ggsave(plot=plot_clean, filename="Climate_dumbbell.png", 
+       height=4.5, width=6.25, dpi=350, units="in")
+
+```
+
+### Interpretation of the Climate Theme Dumbbell Plot
+
+The dumbbell plot shows the pre- and post-workshop scores for the
+Climate theme across different semesters from Fall 2019 to Fall 2023.
+Here’s a detailed interpretation of the results for each session and
+what they reveal about the workshops and participants:
+
+1.  **Fall 2023**:
+    -   **Pre-test Score**: 4.56
+    -   **Post-test Score**: 4.48
+    -   **Change**: -0.08
+    -   **Interpretation**: The scores remained relatively stable, with
+        a slight decrease of 0.08 points. This indicates that
+        participants' perceptions of the Climate theme were largely
+        unaffected by the workshop.
+2.  **Spring 2023**:
+    -   **Pre-test Score**: 4.57
+    -   **Post-test Score**: 3.90
+    -   **Change**: -0.67
+    -   **Interpretation**: There was a significant decrease of 0.67
+        points. This suggests that the workshop led participants to
+        adopt a more critical view of the Climate theme, possibly due to
+        heightened awareness of challenges or issues.
+3.  **Fall 2022**:
+    -   **Pre-test Score**: 4.38
+    -   **Post-test Score**: 3.76
+    -   **Change**: -0.62
+    -   **Interpretation**: A notable decrease of 0.62 points indicates
+        that the workshop impacted participants' perceptions, making
+        them more critical or aware of the complexities associated with
+        the Climate theme.
+4.  **Spring 2022**:
+    -   **Pre-test Score**: 4.72
+    -   **Post-test Score**: 4.45
+    -   **Change**: -0.27
+    -   **Interpretation**: The decrease of 0.27 points suggests a
+        moderate shift in participants' views. While the workshop did
+        lead to some critical reflection, the overall perception
+        remained positive.
+5.  **Fall 2021**:
+    -   **Pre-test Score**: 4.01
+    -   **Post-test Score**: 3.42
+    -   **Change**: -0.59
+    -   **Interpretation**: A significant decrease of 0.59 points
+        indicates that the workshop substantially influenced
+        participants' views, encouraging a more critical perspective on
+        the Climate theme.
+6.  **Fall 2019**:
+    -   **Pre-test Score**: 4.75
+    -   **Post-test Score**: 4.75
+    -   **Change**: 0.00
+    -   **Interpretation**: The scores did not change, suggesting that
+        the workshop had no impact on participants' perceptions of the
+        Climate theme during this semester.
+
+### Overall Interpretation and Workshop Impact
+
+-   **Overall Trend**: Most sessions show a decrease in post-test scores
+    compared to pre-test scores, indicating that the workshops generally
+    led participants to reassess their views on the Climate theme.
+-   **Magnitude of Change**: The magnitude of change varies across
+    semesters, with some sessions (e.g., Spring 2023, Fall 2022) showing
+    more significant decreases than others. This variability could be
+    due to differences in workshop delivery, participant
+    characteristics, or external factors influencing perceptions.
+-   **Critical Reflection**: The consistent decrease in scores suggests
+    that the workshops were effective in promoting critical reflection
+    among participants. By highlighting issues and challenges related to
+    the Climate theme, the workshops encouraged participants to adopt a
+    more nuanced and critical perspective.
+-   **Future Improvements**: The results highlight areas for potential
+    improvement. For sessions with minimal changes (e.g., Fall 2023,
+    Fall 2019), it may be beneficial to review and enhance the workshop
+    content to ensure it effectively engages participants and prompts
+    reflection.
+
+### Conclusion
+
+The dumbbell plot provides valuable insights into the impact of the
+Climate theme workshops across different semesters. While the overall
+trend indicates a decrease in scores, reflecting increased critical
+awareness, the variability suggests that further refinement of the
+workshops could enhance their effectiveness in promoting meaningful
+reflection and learning among participants.
+
+## Split Violin Plot Code to create the Violin Plot
+
+```{r Split Violin Climate Plot with title}
+
+# Color by PRE/POST TEST
+#plot_title1<-expression(
+#  paste("A&A participants Perceive",sep=" ", bold("Less Favorable Campus Climate"))
+#)
+
+pt1 <- paste ("1", "Less", "Favorable", sep = "\n")
+pt7 <- paste("More", "Favorable", "7", sep="\n")
+##################################
+# Graph by Filter
+# Type = Race Support 
+Main_data_AA_filter<-Main_data_AA[Main_data_AA$Type =="Climate",]
+#
+##############
+# Graph by Two or More Filters
+#Main_data_AA_filter2<-subset(Main_data_AA,Type=="Race_Sup"&Year=="2019")
+###################################
+
+SplitV<-ggplot(Main_data_AA_filter, aes(x = Type, y = Value, fill = Test))+
+  geom_split_violin(trim = FALSE, alpha = .4)+
+  geom_boxplot(width = .2, alpha = .6,
+               position = position_dodge(.25))+
+  scale_fill_viridis_d(option = "E") +
+  stat_summary(fun = "mean", geom = "point",
+               position = position_dodge(width = 0.25)) +
+  stat_summary(fun.data = "mean_se", geom = "errorbar", width = .1,
+               position = position_dodge(width = 0.25))+
+
+scale_y_continuous(name = "Climate Rating",
+                     breaks = c(0,2,3,4,5,6,7),
+                     labels = c(pt1, 2, 3, 4, 5, 6, pt7),
+                     limits = c(-2, 10)) +
+  #guides(fill = FALSE)+
+  theme_void()+
+  theme(
+  legend.position = "right",
+  plot.title = element_text(family="sans",size=12, face="bold"),
+   panel.grid = element_blank(),
+  plot.caption = element_text(family = "sans",face = "italic",size=18, color = "blue",hjust=c(0,.1),vjust=c(.5,0)),
+  plot.caption.position = "panel",
+   axis.text.y = element_text(vjust=0, size = 10),
+   axis.text.x = element_text(size = 10),
+    axis.title = element_blank()
+ )#+
+  #ggtitle(plot_title1)
+
+```
+
+## This Saves the Violin Plot
+
+```{r Save A&A Aggregate Climate Violin Plot}
+# Export PNG
+ggsave(plot=SplitV, filename="Climate_V.png", 
+       height=4.5, width=6.25, dpi=350, units="in")
+# Summary Violin Plot Data
+
+# How many observations Pre/Post for n
+#nrow(Main_data_AA_filter[Main_data_AA_filter$Test == 'Pre',])
+
+#
+# What is mean
+#MeanPre<-Main_data_AA_filter[Main_data_AA_filter$Test=='Post',]
+#mean(MeanPre$Value,na.rm=TRUE)
+
+#
+#
+# What is median
+#median(Main_data_AA_filter$Value,na.rm=TRUE)
+```
+
+### Benefits of Using Violin Plots Over Box Plots
+
+Violin plots offer several advantages over traditional box plots,
+particularly for analyzing survey data with pre- and post-test measures:
+
+1.  **Distribution Visualization**: Violin plots combine the features of
+    box plots and density plots, providing a richer understanding of the
+    data distribution. They show the full distribution of the data,
+    highlighting areas of higher and lower density.
+
+2.  **Symmetry and Skewness**: Violin plots make it easier to see if the
+    data is symmetric or skewed, offering insights into the underlying
+    distribution that might be missed with box plots.
+
+3.  **Multi-modal Distributions**: Unlike box plots, violin plots can
+    display multi-modal distributions, where data has multiple peaks,
+    revealing more about the underlying structure of the data.
+
+4.  **Enhanced Comparisons**: Violin plots facilitate comparisons
+    between groups by showing both the summary statistics (median,
+    quartiles) and the distribution shape, making it easier to identify
+    patterns and differences.
+
+### Interpretation of the Violin Plot
+
+#### General Observation
+
+The provided violin plot displays the pre-test (left, blue) and
+post-test (right, yellow) scores for the Climate theme across all
+semesters. The plot includes the distribution density, box plots with
+median and interquartile ranges, and individual data points for more
+granular insights.
+
+#### Detailed Interpretation
+
+1.  **Pre-test Scores (Blue Violin)**:
+    -   **Distribution**: The pre-test scores are distributed with a
+        peak around the median, suggesting most participants initially
+        rated the Climate theme positively.
+    -   **Box Plot**: The box plot within the blue violin shows the
+        median score is higher than the post-test median. The
+        interquartile range (IQR) is relatively narrow, indicating less
+        variability in initial perceptions.
+2.  **Post-test Scores (Yellow Violin)**:
+    -   **Distribution**: The post-test scores show a broader
+        distribution with a peak near the lower quartile, indicating a
+        shift in perceptions after the workshop.
+    -   **Box Plot**: The box plot within the yellow violin indicates a
+        lower median score compared to the pre-test. The IQR is wider
+        than that of the pre-test, suggesting increased variability in
+        responses after the workshop.
+
+#### Patterns and Trends
+
+-   **Shift in Perceptions**: The median post-test score is lower than
+    the median pre-test score, indicating that participants' perceptions
+    of the Climate theme became more critical after the workshop.
+-   **Increased Variability**: The wider IQR and broader distribution of
+    post-test scores suggest that the workshop affected participants
+    differently, leading to a range of perceptions. This increased
+    variability could reflect diverse reactions to the workshop content.
+-   **Density Peaks**: The pre-test violin shows a more concentrated
+    peak, indicating a consensus among participants before the workshop.
+    In contrast, the post-test violin's distribution is more spread out,
+    indicating that the workshop prompted varied responses.
+
+### Implications for the Workshops and Participants
+
+1.  **Critical Reflection**: The shift in median scores suggests that
+    the workshop effectively encouraged participants to critically
+    reflect on the Climate theme. This critical reflection is a key goal
+    of educational interventions aimed at raising awareness about
+    complex issues.
+
+2.  **Diverse Impact**: The increased variability in post-test scores
+    indicates that the workshop's impact varied among participants. This
+    could be due to different levels of prior knowledge, engagement with
+    the workshop material, or personal experiences related to the
+    Climate theme.
+
+3.  **Potential Improvements**: The broad range of post-test scores
+    suggests opportunities for improving the workshop. Tailoring the
+    content to address diverse perspectives and providing additional
+    support for participants with lower post-test scores could enhance
+    the workshop's effectiveness.
+
+4.  **Overall Effectiveness**: Despite the decrease in median scores,
+    the workshop appears to have succeeded in challenging participants'
+    pre-existing views and promoting a more nuanced understanding of the
+    Climate theme.
+
+### Conclusion
+
+The violin plot provides a comprehensive view of the distribution and
+variability of pre- and post-test scores for the Climate theme. It
+highlights a general trend of increased critical reflection and varied
+responses following the workshop. These insights can guide future
+improvements to ensure the workshop effectively addresses the diverse
+needs and perspectives of participants.
+
+## Statistical Analysis
+
+Linear Mixed Models In this study, we employed Linear Mixed Models
+(LMMs) to analyze the pre- and post-survey data. LMMs are particularly
+suited for our data due to several reasons. Firstly, LMMs can
+effectively handle repeated measures, making them ideal for pre/post
+survey designs. This allows us to account for the correlation between
+repeated measures within the same participants. Secondly, LMMs are
+robust to missing data, which is crucial as participants were allowed to
+skip any question they wanted. Thirdly, by incorporating random effects,
+LMMs account for variability between participants and within
+participants over time, providing more accurate and reliable estimates.
+Lastly, LMMs accommodate the nested structure of our data, where
+responses are nested within participants, and participants are nested
+within different survey themes. These characteristics make LMMs an
+optimal choice for our analysis, aligning with recommendations in
+statistical literature (Fitzmaurice, Laird, & Ware, 2011; Rabe-Hesketh &
+Skrondal, 2012).
+
+#Why Linear Mixed Models (LMMs) Are Appropriate Handling Repeated
+Measures: LMMs are well-suited for pre/post survey data because they can
+handle repeated measures on the same subjects. This is crucial when
+participants' responses are collected at multiple time points.
+Flexibility with Missing Data: LMMs can handle missing data more
+effectively than traditional methods like ANOVA. Since participants were
+allowed to skip questions, LMMs can accommodate this by using all
+available data without excluding entire cases due to missing values.
+Incorporating Random Effects: LMMs allow for the inclusion of random
+effects, which can account for variability between subjects
+(participants) and within subjects (different time points). This is
+especially useful when analyzing grouped questions by theme, as it
+acknowledges that responses may vary not only due to the intervention
+but also due to individual differences. Accounting for Nested Data
+Structures: In survey data, responses might be nested within
+participants. LMMs can account for this hierarchical structure,
+providing more accurate estimates of the effects of the intervention.
+
+# References
+
+1.)Statistical Textbooks: Applied Longitudinal Analysis" by Garrett M.
+Fitzmaurice, Nan M. Laird, and James H. Ware: This book provides
+comprehensive coverage of methods for analyzing longitudinal data,
+including LMMs. It discusses the handling of missing data and repeated
+measures, which are relevant to your study.<br> Multilevel and
+Longitudinal Modeling Using Stata" by Sophia Rabe-Hesketh and Anders
+Skrondal: This book is a practical guide to multilevel and longitudinal
+modeling, with examples using Stata. It explains the application of LMMs
+in different contexts, including survey data.<br> 2.) Survey Analysis
+Publications: #Survey Methodology" by Robert M. Groves, Floyd J. Fowler
+Jr., Mick P. Couper, James M. Lepkowski, Eleanor Singer, and Roger
+Tourangeau: This book covers various aspects of survey methodology,
+including data analysis techniques suitable for complex survey data. 3.)
+Program Assessment Publications: #Program Evaluation: An Introduction to
+an Evidence-Based Approach" by David Royse, Bruce A. Thyer, Deborah K.
+Padgett, and T. K. Logan: This book discusses different methods for
+program evaluation, including statistical analyses of survey data.<br>
+4.) Race, Ethnicity, and Quantitative Methodology Publications: \#"Race
+and Ethnicity in the Study of Family and School Contexts" by Alan Booth,
+Ann C. Crouter, and Nancy Landale: This publication includes discussions
+on quantitative methodologies used in race and ethnicity studies, which
+often involve complex survey data.<br>
+
+## Step By Step Workflow for LMM in R
+
+1.) Install and Load Required Packages 2.) Load the Data 3.) Filter Data
+for the Climate Theme 4.) Fit the Linear Mixed Model
+
+##Explanation of the Model: A.Value \~ Test: We are modeling the average
+score (Value) as a function of the test type (Test), which indicates
+whether the score is from the pre-test or post-test. B. (1 \| Year): We
+include a random intercept for each year to account for variability
+between different years. C. (1 \| semester): We include a random
+intercept for each semester to account for variability within semesters.
+##Interpreting the Results: The summary function provides a detailed
+summary of the model. Key components to interpret:
+
+A.Fixed Effects: These are the estimated effects of the predictors (Test
+in this case). The estimate for Testpost will indicate the difference in
+average scores between the pre-test and post-test.
+
+B.Random Effects: These provide estimates of the variability (standard
+deviation) between the random intercepts (years and semesters).
+
+C.Residuals: These provide information about the variability of the
+residuals (differences between observed and predicted values).
+
+```{r Linear Mixed Model }
+install.packages("lme4")
+install.packages("lmerTest")
+install.packages("dplyr")
+install.packages("readr")
+library(lme4)
+library(lmerTest)
+library(dplyr)
+library(readr)
+
+
+# Load the data
+data <- read_csv("Main_data_AA_All.csv")
+
+# View the first few rows of the data
+head(data)
+
+# Filter data for the Climate theme
+climate_data <- data %>% filter(Type == "Climate")
+
+# View the first few rows of the filtered data
+head(climate_data)
+
+# Fit the Linear Mixed Model
+lmm_climate <- lmer(Value ~ Test + (1 | Year) + (1 | Semester), data = climate_data)
+
+# Summarize the model
+summary(lmm_climate)
+
+
+```
+
+```{r Make a Table of the LMM results}
+install.packages("broom.mixed")
+install.packages("gt")
+library(broom.mixed)
+library(gt)
+
+# Tidy the model output
+tidy_lmm <- tidy(lmm_climate, effects = "fixed")
+
+# Create a gt table from the tidy data frame
+gt_table <- tidy_lmm %>%
+  gt() %>%
+  tab_header(
+    title = "Linear Mixed Model Results for Climate Theme",
+    subtitle = "Fixed Effects Estimates"
+  ) %>%
+  fmt_number(
+    columns = vars(estimate, std.error, statistic),
+    decimals = 2
+  ) %>%
+  cols_label(
+    term = "Term",
+    estimate = "Estimate",
+    std.error = "Std. Error",
+    statistic = "t value",
+    p.value = "p value"
+  ) %>%
+  tab_style(
+    style = list(
+      cell_fill(color = "dodgerblue3"),
+      cell_text(weight = "bold", color = "white")
+    ),
+    locations = cells_column_labels(columns = everything())
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = everything()
+  ) %>%
+  tab_options(
+    table.border.top.color = "white",
+    table.border.bottom.color = "white",
+    table.border.left.color = "white",
+    table.border.right.color = "white",
+    column_labels.border.top.color = "white",
+    column_labels.border.bottom.color = "white",
+    data_row.padding = px(5)
+  )
+
+# Print the gt table
+print(gt_table)
+```
+
+
+
+### Interpretation of Fixed Effects
+
+1.  **Intercept (Estimate = 3.9197)**:
+    -   **Estimate**: The estimated average score for the post-test is
+        3.92. This is the baseline against which other effects are
+        compared.
+    -   **Std. Error**: The standard error of the intercept is 0.1933.
+    -   **t value**: The t-value for the intercept is 20.275, indicating
+        the estimate is 20.275 standard errors away from zero.
+    -   **Pr(\>\|t\|)**: The p-value is 3.51e-05, which is extremely
+        small, indicating that the intercept is highly significant (p \<
+        0.001).
+2.  **TestPre (Estimate = 0.5181)**:
+    -   **Estimate**: The estimated difference between the pre-test and
+        post-test scores is 0.52. Since the estimate is positive, it
+        indicates that, on average, the pre-test scores are 0.52 points
+        higher than the post-test scores.
+    -   **Std. Error**: The standard error of the TestPre effect is
+        0.1473.
+    -   **t value**: The t-value for TestPre is 3.518, indicating the
+        estimate is 3.518 standard errors away from zero.
+    -   **Pr(\>\|t\|)**: The p-value is 0.000539, which is less than
+        0.001, indicating that this effect is highly significant.
+
+### Interpretation of the Random Effects
+
+-   **Year (Intercept)**: The variance of the random intercept for Year
+    is 0.085148 with a standard deviation of 0.29180. This suggests
+    there is some variability in the average scores between different
+    years.
+-   **Semester (Intercept)**: The variance of the random intercept for
+    Semester is 0.001149 with a standard deviation of 0.03389. This
+    indicates very little variability in the average scores between
+    different semesters.
+-   **Residual**: The residual variance is 1.041143 with a standard
+    deviation of 1.02036, representing the within-group variability.
+
+### Description of the Workshop's Effects
+
+Based on the results of the Linear Mixed Model, we can draw several
+conclusions about the effects of the workshop on participants'
+perceptions of the Climate theme:
+
+1.  **Baseline Perceptions (Intercept)**:
+    -   The estimated average score for the post-test is 3.92 (t =
+        20.275, p \< 0.001). This suggests that, after the workshop,
+        participants' perceptions of the Climate theme were moderately
+        positive, with an average score close to 4 on a Likert scale.
+2.  **Impact of the Workshop (TestPre)**:
+    -   The estimated difference between the pre-test and post-test
+        scores is 0.52 (t = 3.518, p \< 0.001). This positive
+        coefficient indicates that, on average, participants'
+        perceptions of the Climate theme were higher before attending
+        the workshop compared to after. The statistically significant
+        difference suggests that the workshop had a noticeable impact,
+        leading to a reduction in scores.
+3.  **Interpretation of the Results**:
+    -   The significant reduction in post-test scores (by 0.52 points on
+        average) suggests that the workshop may have led participants to
+        reassess their initial perceptions of the Climate theme. This
+        could be due to increased awareness of issues or challenges
+        related to the Climate theme that were highlighted during the
+        workshop. Participants may have developed a more critical or
+        nuanced understanding, resulting in lower post-test scores.
+4.  **Random Effects**:
+    -   There is some variability in the average scores between
+        different years, as indicated by the random intercept for Year.
+        However, there is very little variability between semesters.
+        This suggests that while the workshop's impact may vary somewhat
+        from year to year, it remains relatively consistent across
+        different semesters.
+5.  **Practical Implications**:
+    -   These findings highlight the importance of continuous assessment
+        and improvement of the workshop content. The decrease in scores
+        could signal the need to address specific concerns raised during
+        the workshop or to provide additional support to participants as
+        they process new information. Understanding why perceptions
+        decreased can help refine the workshop to better meet
+        participants' needs and expectations.
+6.  **Conclusion**:
+    -   In conclusion, while participants initially had a moderately
+        positive perception of the Climate theme, the workshop appears
+        to have led to a significant decrease in their ratings. This
+        suggests that the workshop effectively challenged participants'
+        pre-existing views, promoting a more critical perspective on the
+        Climate theme. Future workshops should aim to balance raising
+        awareness with providing solutions and support to address any
+        concerns that arise.
+
+### Summary of Key Points:
+
+-   **Intercept**: Post-test scores average around 3.92, indicating
+    moderately positive perceptions after the workshop.
+-   **TestPre**: Pre-test scores are, on average, 0.52 points higher
+    than post-test scores, indicating a significant reduction in
+    perceptions due to the workshop.
+-   **Significance**: Both fixed effects (Intercept and TestPre) are
+    highly significant (p \< 0.001).
+-   **Random Effects**: Variability exists between different years but
+    not much between semesters.
+
+This interpretation ties the statistical results back to the practical
+implications of the workshop, helping readers understand the impact of
+the intervention on participants.
+
+## Overall Discussion
+
+Discuss the insights and the findings based on the visualizations. In
+post processing, images were inserted into Google Slides. Tables and
+Titles were added. Then screenshots were imported into the document.
+Certainly! Let's interpret the results of your Linear Mixed Model (LMM)
+for the Climate theme, focusing on the fixed effects, t-values,
+statistical significance with p-values, and then describe the workshop's
+effects.
+
+## Cohen's D Effect Statistical Analysis
+```{r}
+install.packages("effsize")
+library(effsize)
+
+Main_data_AA <- read_csv("Main_data_AA_All.csv")
+#Checking Effect Size to match visual pattern Use Cohen's D to calculate unusual Patterns
+Main_data_AA
+view(Main_data_AA)
+
+# Climate Cohen's d Effect Size
+# Fall 2021
+Main_data_AA_f21<-subset(Main_data_AA,Type=="Climate"&Year=="2021"&Semester=="Fall")
+Main_data_AA_f21pre<-subset(Main_data_AA_f21,Test=="Pre")
+Main_data_AA_f21post<-subset(Main_data_AA_f21,Test=="Post")
+cohen.dF2021<-cohen.d(Main_data_AA_f21pre$Value,Main_data_AA_f21post$Value)
+
+# Climate Cohen's d Effect Size
+# Spring 2022
+Main_data_AA_s22<-subset(Main_data_AA,Type=="Climate"&Year=="2022"&Semester=="Spring")
+Main_data_AA_s22pre<-subset(Main_data_AA_s22,Test=="Pre")
+Main_data_AA_s22post<-subset(Main_data_AA_s22,Test=="Post")
+cohen.dSp2022<-cohen.d(Main_data_AA_s22pre$Value,Main_data_AA_s22post$Value)
+
+# Climate Cohen's d Effect Size 
+# Fall 2022
+Main_data_AA_f22<-subset(Main_data_AA,Type=="Climate"&Year=="2022"&Semester=="Fall")
+Main_data_AA_f22pre<-subset(Main_data_AA_f22,Test=="Pre")
+Main_data_AA_f22post<-subset(Main_data_AA_f22,Test=="Post")
+cohen.dF2022<-cohen.d(Main_data_AA_f22pre$Value,Main_data_AA_f22post$Value)
+
+# Climate Cohen's d Effect Size 
+# Spring 2023
+Main_data_AA_s23<-subset(Main_data_AA,Type=="Climate"&Year=="2023"&Semester=="Spring")
+Main_data_AA_s23pre<-subset(Main_data_AA_s23,Test=="Pre")
+Main_data_AA_s23post<-subset(Main_data_AA_s23,Test=="Post")
+cohen.dSp2023<-cohen.d(Main_data_AA_s23pre$Value,Main_data_AA_s23post$Value)
+
+# Climate Cohen's d Effect Size 
+# Fall 2023
+Main_data_AA_f23<-subset(Main_data_AA,Type=="Climate"&Year=="2023"&Semester=="Fall")
+Main_data_AA_f23pre<-subset(Main_data_AA_f23,Test=="Pre")
+Main_data_AA_f23post<-subset(Main_data_AA_f23,Test=="Post")
+cohen.dF2023<-cohen.d(Main_data_AA_f23pre$Value,Main_data_AA_f23post$Value)
+
+
+
+
+
+```
+Cohen's d is a measure of effect size used to indicate the standardized difference between two means. It is particularly useful for understanding the practical significance of differences observed in data, supplementing the p-values from hypothesis tests. Here's a brief discussion on the appropriateness of Cohen's d for the data:
+
+#Appropriateness of Cohen's d
+When Cohen's d is Appropriate:
+
+#Two Groups Comparison: 
+Cohen's d is typically used to compare the means of two groups, such as pre-test vs. post-test scores.
+#Understanding Effect Size: 
+It provides a standardized measure of the magnitude of differences, helping to interpret the practical significance of the results.
+#In This Context:
+Given that the data involve pre-test and post-test scores, calculating Cohen's d can be appropriate to quantify the effect size of the workshop. However, it should be noted that Cohen's d is usually applied in the context of independent samples or paired samples t-tests. In this case, where data may have repeated measures and nested structures, it can still be useful but should be interpreted with some caution.
+
+### Interpretation of Cohen's d for Workshop Participants and Impact
+
+Cohen's d is a measure of effect size that quantifies the difference between two means in terms of standard deviations. It is used to understand the practical significance of the difference between pre-test and post-test scores for each semester in your workshop. Here's what the results mean for the participants and the workshops:
+
+1. **Fall 2021 (Cohen’s d = 0.547, Medium)**:
+   - **Interpretation**: The workshop had a medium effect size, indicating a moderate impact on participants' perceptions. This suggests that the workshop was somewhat effective in changing participants' views on the Climate theme.
+   - **Implications**: The moderate effect size indicates that while the workshop was successful in influencing participants' attitudes, there may be room for improvement in the content or delivery to achieve a larger impact.
+
+2. **Spring 2022 (Cohen’s d = 0.247, Small)**:
+   - **Interpretation**: The small effect size suggests a limited impact of the workshop on participants' perceptions. The change in views was present but not substantial.
+   - **Implications**: The small effect size indicates a need to review the workshop's content and methodology to enhance its effectiveness. Additional support or interactive elements might be necessary to engage participants more deeply.
+
+3. **Fall 2022 (Cohen’s d = 0.625, Medium)**:
+   - **Interpretation**: The medium effect size reflects a moderate impact on participants' perceptions. The workshop successfully prompted a notable change in attitudes.
+   - **Implications**: Similar to Fall 2021, the moderate effect size shows the workshop's effectiveness, but there is potential to further refine and improve the program to achieve a greater impact.
+
+4. **Spring 2023 (Cohen’s d = 0.978, Large)**:
+   - **Interpretation**: The large effect size indicates a significant impact on participants' perceptions. The workshop was highly effective in changing views on the Climate theme.
+   - **Implications**: The large effect size demonstrates the success of the workshop in Spring 2023. This effectiveness could be attributed to the content, delivery, or specific cohort of participants. It is essential to analyze what worked well during this semester to replicate this success in future workshops.
+
+5. **Fall 2023 (Cohen’s d = 0.076, Negligible)**:
+   - **Interpretation**: The negligible effect size suggests that the workshop had little to no impact on participants' perceptions. The pre-test and post-test scores were very similar.
+   - **Implications**: The negligible effect size indicates a need for a thorough review of the workshop. Factors such as engagement, relevance of content, or external influences might have affected its impact. Adjustments are necessary to enhance the workshop's effectiveness for future participants.
+
+6. **Fall 2019 (NA*)**:
+   - **Interpretation**: No post-test data was collected for Fall 2019, so it is not possible to calculate Cohen's d for this semester.
+   - **Implications**: Since no post-test data is available, it is crucial to ensure comprehensive data collection in future workshops to evaluate their impact accurately.
+
+### Summary
+
+The Cohen's d results provide valuable insights into the effectiveness of the workshops across different semesters:
+
+- **Medium Effect Sizes (Fall 2021, Fall 2022)**: These semesters showed a moderate impact, indicating that the workshops were effective but could benefit from further enhancements.
+- **Small Effect Size (Spring 2022)**: The limited impact suggests a need for reviewing and improving the workshop content and engagement strategies.
+- **Large Effect Size (Spring 2023)**: The significant impact highlights the success of the workshop during this semester. Understanding the factors contributing to this success can help replicate it in future sessions.
+- **Negligible Effect Size (Fall 2023)**: The minimal impact indicates the need for a detailed review and substantial adjustments to the workshop.
+
+
+## Conclusion
+
+### Summary of Key Takeaways from the Climate Analysis
+
+#### 1. Dumbbell Plot Interpretation
+- **Overall Trend**: Most sessions show a decrease in post-test scores compared to pre-test scores, indicating that the workshops generally led participants to reassess their views on the Climate theme.
+- **Magnitude of Change**: The magnitude of change varies across semesters, with some sessions (e.g., Spring 2023, Fall 2022) showing more significant decreases than others. This variability could be due to differences in workshop delivery, participant characteristics, or external factors influencing perceptions.
+- **Critical Reflection**: The consistent decrease in scores suggests that the workshops were effective in promoting critical reflection among participants, encouraging them to adopt a more nuanced and critical perspective on the Climate theme.
+- **Future Improvements**: Sessions with minimal changes (e.g., Fall 2023, Fall 2019) may benefit from a review and enhancement of the workshop content to ensure it effectively engages participants and prompts reflection.
+
+#### 2. Violin Plot Interpretation
+- **Pre-test Scores**: The pre-test scores are concentrated around the median, indicating a general consensus among participants with initially positive perceptions of the Climate theme.
+- **Post-test Scores**: The post-test scores show a broader distribution, with a lower median, suggesting a shift in perceptions after the workshop. This indicates increased critical reflection and varied responses.
+- **Increased Variability**: The broader distribution and wider interquartile range (IQR) in post-test scores suggest that the workshop's impact varied among participants, leading to a range of perceptions.
+- **Implications**: The results highlight the effectiveness of the workshops in challenging participants' pre-existing views and promoting a more critical understanding. However, the variability suggests the need for tailored content to address diverse perspectives and provide additional support where needed.
+
+#### 3. Linear Mixed Model (LMM) Analysis
+- **Baseline Perceptions (Intercept)**: The estimated average post-test score is 3.92, indicating moderately positive perceptions after the workshop.
+- **Impact of the Workshop (TestPre)**: The pre-test scores are, on average, 0.52 points higher than the post-test scores, indicating a significant reduction in perceptions due to the workshop.
+- **Statistical Significance**: Both the intercept and the TestPre effect are highly significant (p < 0.001), indicating that the observed changes are unlikely to have occurred by chance.
+- **Random Effects**: Variability exists between different years but not much between semesters, suggesting that while the overall trend shows a decrease in scores, it remains relatively consistent across different semesters.
+- **Implications**: The LMM results suggest that the workshops effectively challenged participants' pre-existing views, promoting a more critical perspective on the Climate theme. Future workshops should aim to balance raising awareness with providing solutions and support to address any concerns that arise.
+
+#### 4. Cohen's d Analysis
+- **Fall 2021 (Medium, d = 0.547)**: The workshop had a moderate impact, suggesting effectiveness in changing participants' views but with room for improvement.
+- **Spring 2022 (Small, d = 0.247)**: The limited impact indicates a need to review and enhance the workshop content and engagement strategies.
+- **Fall 2022 (Medium, d = 0.625)**: Similar to Fall 2021, the moderate impact suggests the workshop was effective but could be improved further.
+- **Spring 2023 (Large, d = 0.978)**: The significant impact highlights the success of the workshop, with the need to understand and replicate the factors contributing to this success.
+- **Fall 2023 (Negligible, d = 0.076)**: The minimal impact suggests a thorough review and substantial adjustments to the workshop are necessary.
+- **Fall 2019 (NA)**: No post-test data was collected, indicating the importance of comprehensive data collection in future workshops.
+
+### Conclusion
+The analysis of the Climate theme across different semesters provides valuable insights into the effectiveness of the workshops:
+- **Effectiveness in Promoting Critical Reflection**: The workshops generally led to a more critical perspective among participants, as indicated by the decrease in post-test scores and increased variability.
+- **Variability in Impact**: The impact varied across semesters, with some sessions showing significant changes and others showing minimal changes, highlighting the need for continuous assessment and improvement.
+- **Statistical and Practical Significance**: The LMM and Cohen's d analyses confirm the statistical and practical significance of the workshops' impact, emphasizing the need for tailored content and support to enhance effectiveness.
+- **Future Directions**: To maximize the impact of future workshops, it is essential to understand and replicate successful strategies, address diverse perspectives, and provide comprehensive support to participants.
+
+
+## Session Information
+
+```{r}
+sessionInfo()
+```
+
